@@ -1,0 +1,91 @@
+name: 🤖 Dawm AI Agent Core
+on:
+  schedule:
+    - cron: '*/15 * * * *' # يعمل تلقائياً كل 15 دقيقة لفحص أي طلبات إصلاح أو تطوير جديدة
+  workflow_dispatch: # يتيح لك تشغيل الوكيل يدوياً بضغطة زر من GitHub
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/preferred-node-version@v1
+      with:
+        node-version: '20'
+
+    - name: Run Gemini Processing Agent
+      env:
+        GEMINI_KEY: \${{ secrets.GEMINI_API_KEY }}
+        FTP_PASS: \${{ secrets.FTP_PASSWORD }}
+      run: |
+        cat << 'EOF' > agent.js
+        const fs = require('fs');
+
+        // ⚠️ إعدادات الاتصال بموقعك على GoogieHost بقاعدة البيانات
+        // الوكيل يتصل بـ API موقعك ليجلب الطلبات المعلقة (Pending)
+        async function fetchPendingTasks() {
+            console.log("🤖 جاري الفحص والاتصال بموقعك لجلب المهام المعلقة...");
+            // هنا يتصل الوكيل بملف استقبال سنصنعه في موقعك
+            const response = await fetch('https://googiehost.com');
+            return await response.json();
+        }
+
+        async function processWithGemini(prompt, currentCode) {
+            console.log("🧠 جاري إرسال الطلب والمقاطع البرمجية لعقل Gemini AI...");
+            const url = `https://googleapis.com{process.env.GEMINI_KEY}`;
+            
+            const systemInstruction = "أنت مهندس برمجيات محترف وخبير في PHP و Clean HTML/CSS. قم بتعديل الكود المطلوب بناءً على طلب المستخدم، وأعد لي الكود البرمجي الكامل والنهائي فقط بدون أي مقدمات أو علامات تظليل ماركداون (مثل ```php).";
+            
+            const payload = {
+                contents: [{
+                    parts: [{ text: `الطلب البرمجي: ${prompt}\n\nالكود الحالي للملف:\n${currentCode}` }]
+                }],
+                systemInstruction: { parts: [{ text: systemInstruction }] }
+            };
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        async function updateSiteFiles(taskId, fileName, updatedCode) {
+            console.log(`📤 جاري ترحيل وحقن الكود الجديد إلى السيرفر للملف: ${fileName}`);
+            await fetch('https://egaskme.com', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_id: taskId, file: fileName, code: updatedCode })
+            });
+        }
+
+        async function start() {
+            try {
+                const tasks = await fetchPendingTasks();
+                if (tasks.length === 0) {
+                    console.log("😴 لا توجد مهام برمجية معلقة حالياً.");
+                    return;
+                }
+                for (const task of tasks) {
+                    console.log(`🚀 جاري العمل على المهمة رقم #${task.id}: ${task.prompt}`);
+                    // مثال ثابت لتعديل ملف الواجهة الرئيسية، يمكن للمساعد الذكي تحديد الملف ديناميكياً
+                    const targetFile = 'index.php'; 
+                    const currentCodeRes = await fetch(`https://googiehost.com{targetFile}`);
+                    const currentCode = await currentCodeRes.text();
+
+                    const newCode = await processWithGemini(task.prompt, currentCode);
+                    await updateSiteFiles(task.id, targetFile, newCode);
+                    console.log(`✅ تمت المهمة #${task.id} بنجاح واكتمل التحديث السحابي!`);
+                }
+            } catch (err) {
+                console.error("❌ خطأ أثناء تشغيل العقل السحابي:", err);
+            }
+        }
+        start();
+        EOF
+        node agent.js
