@@ -3,6 +3,7 @@ import base64
 import json
 import random
 import requests
+import threading  # 🧵 ميزة العمل الخلفي لحل مشكلة توقف السيرفر المجاني
 from io import BytesIO
 from flask import Flask, jsonify
 from google import genai
@@ -10,12 +11,11 @@ from PIL import Image, ImageDraw
 
 app = Flask(__name__)
 
-# 🔐 جلب المتغيرات الحساسة بأمان من إعدادات البيئة (Environment Variables) في Render
+# جلب المتغيرات السرية بأمان من Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 WEBSITE_API_URL = os.environ.get("WEBSITE_API_URL")
 SECRET_AUTH_KEY = os.environ.get("SECRET_AUTH_KEY")
 
-# مواضيع إخبارية مقترحة ليختار منها الروبوت عشوائياً في كل مرة
 TOPICS_POOL = [
     "مستقبل الذكاء الاصطناعي التوليدي وثورة الروبوتات في عام 2026",
     "تأثير التكنولوجيا الحديثة على التعليم الذكي ووظائف المستقبل",
@@ -25,7 +25,7 @@ TOPICS_POOL = [
 ]
 
 def generate_article_with_gemini(topic):
-    """الاستعانة بجميني لإنشاء المقال بصيغة JSON"""
+    """الاتصال بجميني لجلب المقال"""
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         prompt = f"""
@@ -45,32 +45,31 @@ def generate_article_with_gemini(topic):
         text_data = response.text.strip().replace("```json", "").replace("```", "")
         return json.loads(text_data)
     except Exception as e:
-        print(f"Error in Gemini: {str(e)}")
+        print(f"❌ خطأ أثناء الاتصال بجميني: {str(e)}")
         return None
 
 def create_auto_thumbnail():
-    """توليد صورة غلاف للمقال بشكل برمجي متناسق مع لون موقعك"""
-    img = Image.new('RGB', (800, 450), color='#1e3c72')
-    canvas = ImageDraw.Draw(img)
-    canvas.rectangle([(0, 430), (800, 450)], fill='#00d2ff')
-    canvas.text((40, 200), "Dawm News AI Content", fill='#ffffff')
-    
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    """توليد صورة الغلاف برمجياً وبسرعة فائقة"""
+    try:
+        img = Image.new('RGB', (800, 450), color='#1e3c72')
+        canvas = ImageDraw.Draw(img)
+        canvas.rectangle([(0, 430), (800, 450)], fill='#00d2ff')
+        
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    except Exception as e:
+        print(f"❌ خطأ أثناء رسم الصورة: {str(e)}")
+        return None
 
-@app.route('/')
-def home():
-    return jsonify({"status": "Bot is running online successfully!"})
-
-@app.route('/run-bot')
-def run_bot():
-    """الرابط المخصص لإطلاق الروبوت وجعله ينشر فوراً"""
-    topic = random.choice(TOPICS_POOL)
+def async_bot_task(topic):
+    """هذه الدالة تعمل بالكامل خلف الكواليس لحماية السيرفر المجاني من التوقف"""
+    print(f"🤖 بدأ الروبوت العمل على موضوع: {topic}")
     article = generate_article_with_gemini(topic)
     
     if not article:
-        return jsonify({"error": "Failed to generate content from Gemini"}), 500
+        print("❌ توقف العمل: لم يتم استقبال بيانات من جميني.")
+        return
         
     image_b64 = create_auto_thumbnail()
     
@@ -89,9 +88,27 @@ def run_bot():
     
     try:
         response = requests.post(WEBSITE_API_URL, json=payload, headers=headers)
-        return jsonify({"success": True, "server_response": response.json()})
+        print(f"🎉 تم إنهاء العملية وضخ المقال بنجاح! رد الموقع الإخباري: {response.text}")
     except Exception as e:
-        return jsonify({"error": f"Failed to push to website: {str(e)}"}), 500
+        print(f"❌ خطأ أثناء ضخ المقال للموقع: {str(e)}")
+
+@app.route('/')
+def home():
+    return jsonify({"status": "Bot is running online successfully!"})
+
+@app.route('/run-bot')
+def run_bot():
+    """الرابط يستجيب فوراً في جزء من الثانية لمتصفحك، ويترك الروبوت يعمل بالخلفية بأمان"""
+    topic = random.choice(TOPICS_POOL)
+    
+    # 🧵 إطلاق خيط معالجة خلفي مستقل
+    thread = threading.Thread(target=async_bot_task, args=(topic,))
+    thread.start()
+    
+    return jsonify({
+        "success": True, 
+        "message": "🤖 تم إيقاظ الوكيل الذكي بنجاح! جاري توليد المقال ورسم الصورة ونشرها خلف الكواليس حالياً."
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
